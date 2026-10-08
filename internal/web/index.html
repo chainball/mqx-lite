@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>mqx-lite · K 线 + jqs 指标引擎</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+  body { margin:0; background:#0d1117; color:#e6edf3; font-family:Menlo,Consolas,monospace; }
+  .bar { display:flex; align-items:center; gap:12px; padding:12px 16px; background:#161b22; border-bottom:1px solid #30363d; }
+  .bar input { background:#0d1117; color:#e6edf3; border:1px solid #30363d; padding:6px 10px; border-radius:6px; font-family:inherit; width:100px; }
+  .bar button { background:#0b6e6e; color:#fff; border:0; padding:6px 14px; border-radius:6px; cursor:pointer; font-family:inherit; }
+  .bar .title { color:#0b6e6e; font-weight:bold; }
+  #chart { width:100%; height:520px; }
+  .editor { padding:16px; display:grid; grid-template-columns:1fr; gap:10px; }
+  .editor textarea { background:#0d1117; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:10px; font-family:inherit; font-size:13px; height:140px; line-height:1.6; }
+  .editor button { background:#0b6e6e; color:#fff; border:0; padding:8px 16px; border-radius:6px; cursor:pointer; font-family:inherit; width:120px; }
+  #err { color:#f85149; font-size:13px; white-space:pre-wrap; margin:0; }
+  .hint { color:#8b949e; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <span class="title">mqx-lite</span>
+  <span>代码</span>
+  <input id="code" value="000001">
+  <button onclick="load()">加载 K 线</button>
+  <span class="hint">可用算子: MA(arr,n) EMA(arr,n) BOLL(close,n,k) ATR(high,low,close,n) RSI(close,n) MACD(close)</span>
+</div>
+<div id="chart"></div>
+<div class="editor">
+  <textarea id="script" spellcheck="false">return {
+  MA5: MA(close, 5),
+  MA20: MA(close, 20),
+  BOLL: BOLL(close, 20, 2),
+};</textarea>
+  <button onclick="run()">运行指标</button>
+  <pre id="err"></pre>
+</div>
+
+<script>
+const chart = echarts.init(document.getElementById('chart'));
+let lastBars = null;
+
+async function load() {
+  const code = document.getElementById('code').value;
+  const r = await fetch('/api/bars?code=' + encodeURIComponent(code));
+  if (!r.ok) { showErr(await r.text()); return; }
+  lastBars = await r.json();
+  showErr('');
+  draw([]);
+}
+
+async function run() {
+  if (!lastBars) { showErr('先加载 K 线'); return; }
+  const code = document.getElementById('code').value;
+  const script = document.getElementById('script').value;
+  const r = await fetch('/api/indicators', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({code, script})
+  });
+  if (!r.ok) { showErr(await r.text()); return; }
+  const result = await r.json();
+  showErr('');
+  draw(toSeries(result));
+}
+
+function toSeries(result) {
+  const out = [];
+  for (const [name, v] of Object.entries(result)) {
+    if (Array.isArray(v)) {
+      out.push({ name, type: 'line', data: v, symbol: 'none', smooth: true, lineStyle: { width: 1 } });
+    } else if (v && typeof v === 'object') {
+      for (const [sub, arr] of Object.entries(v)) {
+        if (Array.isArray(arr)) out.push({ name: name + '.' + sub, type: 'line', data: arr, symbol: 'none', smooth: true, lineStyle: { width: 1 } });
+      }
+    }
+  }
+  return out;
+}
+
+function draw(indicators) {
+  const series = [{ name: 'K线', type: 'candlestick', data: lastBars.bars }].concat(indicators);
+  chart.setOption({
+    backgroundColor: '#0d1117',
+    tooltip: { trigger: 'axis' },
+    legend: { top: 0, textStyle: { color: '#8b949e' } },
+    grid: { left: 50, right: 20, top: 30, bottom: 60 },
+    xAxis: { type: 'category', data: lastBars.times, axisLine: { lineStyle: { color: '#30363d' } } },
+    yAxis: { scale: true, axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { lineStyle: { color: '#161b22' } } },
+    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 20, bottom: 10 }],
+    series,
+  });
+}
+
+function showErr(msg) { document.getElementById('err').textContent = msg; }
+load();
+</script>
+</body>
+</html>
